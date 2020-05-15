@@ -1,0 +1,135 @@
+---
+title: "wine comparison chardonnay and sauvignon blanc"
+author: "Divyanshu Marwah"
+date: "4/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Comparison between Chardonnay and Sauvignon Blanc
+
+```{r load_libraries}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+```
+
+
+
+```{r load_data}
+wine <- read.csv("./wine-reviews/winemag-data-130k-v2.csv")
+head(wine)
+```
+```{r filter_two_groups}
+two_groups <- wine%>%
+  filter( ((variety=="Sauvignon Blanc" & country=="South Africa") | 
+            (variety=="Chardonnay" & country=="Chile")) & 
+            price == 15)
+head(two_groups)
+```
+```{r}
+dim(two_groups)
+```
+
+```{r box_plot_groups}
+ggplot(two_groups) + geom_boxplot(aes(variety, points, fill = variety)) + geom_jitter(aes(variety, points, 
+                                                                                          shape = variety))
+```
+```{r grouped_mean}
+aggregate(two_groups$points, list(two_groups$variety), mean)
+```
+```{r grouped_median}
+aggregate(two_groups$points, list(two_groups$variety), median)
+```
+```{r grouped_sd}
+aggregate(two_groups$points, list(two_groups$variety), sd)
+```
+```{r t_test}
+t.test(points ~ variety, data=two_groups, var.equal = TRUE)
+```
+```{r gibbs_compare_function}
+compare_2_gibbs <- function(y, ind, mu0 = 85, tau0 = 1/100, del0 = 0, gamma0 = 1/100,
+a0 = 1, b0 = 85, maxiter = 5000)
+{
+y1 <- y[ind == 'Chardonnay']
+y2 <- y[ind == 'Sauvignon Blanc']
+y1
+y2
+n1 <- length(y1)
+n2 <- length(y2)
+##### starting values
+mu <- (mean(y1) + mean(y2)) / 2
+del <- (mean(y1) - mean(y2)) / 2
+mat_store <- matrix(0, nrow = maxiter, ncol = 3)
+#####
+##### Gibbs sampler
+an <- a0 + (n1 + n2)/2
+for(s in 1 : maxiter)
+{
+##update tau
+bn <- b0 + 0.5 * (sum((y1 - mu - del) ^ 2) + sum((y2 - mu + del) ^ 2))
+tau <- rgamma(1, an, bn)
+##
+##update mu
+taun <- tau0 + tau * (n1 + n2)
+mun <- (tau0 * mu0 + tau * (sum(y1 - del) + sum(y2 + del))) / taun
+mu <- rnorm(1, mun, sqrt(1/taun))
+##
+##update del
+gamman <- tau0 + tau*(n1 + n2)
+deln <- ( del0 * tau0 + tau * (sum(y1 - mu) - sum(y2 - mu))) / gamman
+del<-rnorm(1, deln, sqrt(1/gamman))
+##
+## store parameter values
+mat_store[s, ] <- c(mu, del, tau)
+}
+colnames(mat_store) <- c("mu", "del", "tau")
+return(mat_store)
+}
+```
+```{r comapare_gibbs_sampling}
+library(MCMCpack)
+fit <- compare_2_gibbs(two_groups$points, two_groups$variety)
+```
+```{r plot_fit}
+fit.mcmc<-as.mcmc(fit)
+plot(fit.mcmc)
+```
+```{r}
+acf(fit.mcmc)
+```
+
+
+```{r group_stats}
+raftery.diag(as.mcmc(fit))
+```
+```{r fit_mean}
+apply(fit, 2, mean)
+```
+```{r  fit_sd}
+apply(fit, 2, sd)
+```
+```{r}
+mean(1/sqrt(fit[, 3]))
+```
+
+```{r  fit_tau}
+sd(1/sqrt(fit[, 3]))
+```
+```{r  Predictive_distributions}
+y1_sim <- rnorm(5000, fit[, 1] + fit[, 2], sd = 1/sqrt(fit[, 3]))
+y2_sim <- rnorm(5000, fit[, 1] - fit[, 2], sd = 1/sqrt(fit[, 3]))
+ggplot(data.frame(y_sim_diff = y1_sim - y2_sim)) + stat_bin(aes(y_sim_diff))
+```
+```{r}
+mean(y1_sim < y2_sim)
+```
+```{r}
+ggplot(data.frame(y1_sim, y2_sim)) + geom_point(aes(y1_sim, y2_sim), alpha = 0.3) +
+geom_abline(slope = 1, intercept = 0)
+```
+

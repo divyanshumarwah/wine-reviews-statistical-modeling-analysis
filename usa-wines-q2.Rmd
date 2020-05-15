@@ -1,0 +1,333 @@
+---
+title: "USA Wines Analysis"
+author: "Divyanshu Marwah"
+date: "5/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r load_packages, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(imputeTS)
+library(GGally)
+library(Boruta)
+library(DAAG)
+library(DMwR)
+```
+
+## Load Data
+
+```{r load_data, echo=FALSE}
+wine_full <- read.csv("./wine-reviews/winemag-data-130k-v2.csv")
+head(wine_full)
+```
+```{r}
+str(wine_full)
+```
+
+## Filter data
+
+```{r filter_data, include=FALSE}
+us_wines <-  wine_full%>%
+  filter(country == 'US')
+```
+
+## derive new features
+```{r}
+us_wines<-us_wines %>% 
+  mutate(year = as.numeric(str_extract(title, "\\d{4}")))
+str(us_wines$year)
+```
+
+
+```{r}
+us_wines$wordcount <- sapply(gregexpr("\\S+", us_wines$description), length)
+
+summary(us_wines$wordcount)
+```
+
+## removing unnecessary columns
+
+```{r remove_unnecessary_features, include=FALSE}
+us_wines1<- within(us_wines, rm("X","country","taster_name","taster_twitter_handle","description","title"))
+```
+
+## missing data imputation
+
+```{r impute_data, echo=FALSE}
+cat('Rows and Columns -> ')
+dim(us_wines1)
+cat('Complete cases -> ', sum(complete.cases(us_wines1)))
+cat('Total null values -> ' , sum(is.na(us_wines1)))
+list_na <- colnames(us_wines1)[apply(us_wines1, 2, anyNA)]
+cat('Columns with null values -> ')
+list_na
+
+nulls <- sapply(us_wines1, function(x) sum(is.na(x)))
+#cat('null count for each column -> ')
+nulls
+cat('Using imputeTS to fill NA values with mean ... ')
+
+mean_fill <- us_wines1%>%
+                na_mean()
+cat('Missing values after filling with mean -> ', sum(is.na(mean_fill)))
+us_wines1 <- mean_fill 
+```
+
+```{r}
+head(us_wines1)
+```
+## visualizing the distribution of points
+
+```{r}
+ggplot(data = us_wines1, aes(x= points, colour = I('black'), fill = I('#099DD9')))+
+  geom_histogram(binwidth = 1)+
+  labs(x = "Points", y= "Frequency", title = "Distribution of points")
+```
+##looking at correlation in numerical columns
+
+```{r}
+ggplot(data = us_wines1, aes(x=wordcount, y=points))+geom_point()
+```
+```{r}
+cor(us_wines1$points, us_wines1$wordcount)
+```
+
+```{r}
+ggplot(data = us_wines1, aes(x=price, y=points))+ geom_point()
+```
+```{r}
+```
+
+
+```{r}
+cor(us_wines1$points, us_wines1$price)
+```
+
+```{r, include=FALSE}
+#ggplot(wine_samp) + geom_boxplot(aes(x = reorder(province, points, median), points,fill = reorder(province, points, median)))
+#boxplot(points ~ province, data = us_wines1) 
+```
+
+## encoding categorical variables
+
+```{r}
+encode_ordinal <- function(x, order = unique(x)) {
+  x <- as.numeric(factor(x, levels = order, exclude = NULL))
+  x
+}
+
+us_wines1$designation<-encode_ordinal(us_wines1[["designation"]])
+us_wines1$province <- encode_ordinal(us_wines1[["province"]])
+us_wines1$region_1<-encode_ordinal(us_wines1[["region_1"]])
+us_wines1$region_2<-encode_ordinal(us_wines1[["region_2"]])
+us_wines1$variety<-encode_ordinal(us_wines1[["variety"]])
+us_wines1$winery<-encode_ordinal(us_wines1[["winery"]])
+
+```
+
+## sampling datasets
+```{r}
+ntotal <- nrow(us_wines1)
+nsamp <- 1000 ## subset to sample
+ind_samp <- sample(1:ntotal, nsamp, replace = FALSE) ## which datapoints to sample
+wine_samp <- us_wines1[ind_samp, ] ## which datapoints to sample
+wine_samp <- droplevels(wine_samp)
+```
+
+## finding signifcant features
+```{r}
+# Perform Boruta search
+boruta_output <- Boruta(points ~ ., data=wine_samp, doTrace=1)  
+```
+
+```{r}
+boruta_signif <- getSelectedAttributes(boruta_output, withTentative = TRUE)
+print(boruta_signif)
+```
+
+```{r}
+# Do a tentative rough fix
+roughFixMod <- TentativeRoughFix(boruta_output)
+boruta_signif <- getSelectedAttributes(roughFixMod)
+print(boruta_signif)
+```
+```{r}
+# Variable Importance Scores
+imps <- attStats(roughFixMod)
+imps2 = imps[imps$decision != 'Rejected', c('meanImp', 'decision')]
+head(imps2[order(-imps2$meanImp), ],10)  # descending sort
+```
+
+```{r}
+# Plot variable importance
+plot(boruta_output, cex.axis=.7, las=2, xlab="", main="Variable Importance")  
+```
+Since Boruta suggested all the features as significant and above shadowMax, so building a model with all the features and checking by p-values.
+
+
+```{r}
+ntotal <- nrow(us_wines1)
+nsamp <- 1000 ## subset to sample
+ind_samp <- sample(1:ntotal, nsamp, replace = FALSE) ## which datapoints to sample
+wine_samp <- us_wines1[ind_samp, ] ## which datapoints to sample
+wine_samp <- droplevels(wine_samp)
+```
+
+## model building
+```{r}
+model<- lm(points~.,data = wine_samp)
+summary(model)
+```
+from p-values, it is significant which features are importannt to the model, 
+however, vealidating it with step-wise linear regression.
+
+```{r}
+AIC(model)
+BIC(model)
+```
+
+```{r}
+step_AIC_backward <- step(model)
+```
+
+```{r}
+model2 <- lm(points~wordcount+price+year+winery, data = wine_samp)
+summary(model2)
+```
+
+```{r}
+AIC(model2)
+BIC(model2)
+```
+## checking interaction terms
+
+```{r}
+cor(us_wines1$province,us_wines1$region_2)
+```
+
+```{r}
+cor(us_wines1$winery,us_wines1$variety)
+```
+
+```{r}
+model3 <- lm(points~wordcount+price+year+winery+province*region_2, data = wine_samp)
+summary(model3)
+```
+
+```{r}
+step_AIC_backward1 <- step(model3)
+```
+
+
+
+```{r}
+AIC(model3)
+BIC(model3)
+```
+
+```{r}
+yhat <- predict(model3)
+plot(yhat, wine_samp$points)
+```
+
+## comparing models for finding a better model
+```{r}
+anova(model2, model3)
+```
+## comparing error rates
+```{r}
+## for model3
+DMwR::regr.eval(wine_samp$points, yhat)
+```
+```{r}
+## for model2
+yhat1<-predict(model2)
+DMwR::regr.eval(wine_samp$points, yhat1)
+```
+it is significant that from the error rates and anova comaprison that model3 fits slightly better than the model2.
+hence using model3 for fitting into entire dataset.
+
+# fitting the model to entire dataset
+
+## Create the training and test data
+```{r train_test_split}
+trainingRowIndex <- sample(1:nrow(us_wines1), 0.8*nrow(us_wines1))
+trainingData <- us_wines1[trainingRowIndex, ]  # model training data
+testData  <- us_wines1[-trainingRowIndex, ]   # test data
+```
+
+
+## Fit the model on training data and predict dist on test data
+```{r}
+# Build the model on training data
+lmMod <- lm(points ~ wordcount + price + winery + province * region_2 + year, data = trainingData)  # build the model
+pointsPred <- predict(lmMod, testData)  # predict points
+```
+
+## review diagnostic measures
+```{r}
+summary (lmMod) # model summary
+```
+as per summary statistics, we can see high p-value for winery:variety, so removing this feature
+
+```{r}
+# Build the model on training data
+lmMod1 <- lm(points ~ wordcount + price + winery + year , data = trainingData)  # build the model
+pointsPred <- predict(lmMod1, testData)  # predict points
+```
+
+## review diagnostic measures
+```{r}
+summary (lmMod1) # model summary
+```
+```{r}
+AIC(lmMod)
+BIC(lmMod)
+```
+
+```{r}
+BIC(lmMod1)
+```
+
+## calculate prediction accuracy
+```{r}
+actuals_preds <- data.frame(cbind(actuals=testData$points, predicteds=pointsPred))  # make actuals_predicteds dataframe.
+correlation_accuracy <- cor(actuals_preds)
+correlation_accuracy  #0.6409507
+head(actuals_preds)
+```
+```{r}
+# Min-Max Accuracy Calculation
+min_max_accuracy <- mean(apply(actuals_preds, 1, min) / apply(actuals_preds, 1, max))  
+min_max_accuracy
+```
+
+```{r}
+plot(pointsPred, testData$points)
+```
+
+```{r}
+plot(lmMod1, which=2)
+```
+
+## calculating error rates
+```{r}
+DMwR::regr.eval(actuals_preds$actuals, actuals_preds$predicteds)
+```
+
+## not needed
+## performing cross validation
+```{r}
+cvResults <- suppressWarnings(CVlm(data = wine_samp,form.lm = formula(points~wordcount + price + winery + province * region_2 + designation),m = 5,dots = FALSE,seed = 29,
+                                   legend.pos = "topleft",printit = FALSE)) # performs the CV
+
+attr(cvResults, 'ms')  
+```
