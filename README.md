@@ -1,8 +1,8 @@
 # Wine Reviews Statistical Modeling and Analysis
 
-###Data used: https://www.kaggle.com/zynicide/wine-reviews
+### Data used: https://www.kaggle.com/zynicide/wine-reviews
 
-###Objective:
+### Objective:
 
 - use of Bayesian Statistics for comparison of different group of wines:
     
