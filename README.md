@@ -20,3 +20,6 @@
         - comparison of different models using AIC/BIC and different error metrics.
  
 Project developed as a part of Major Assignment for CS7DS3-Applied Statistical Modelling.
+
+Blog Post for comparison of "Chilean Chardonnay" and "South African Sauvignon Blanc".
+https://medium.com/@divyanshu.marwah/using-bayesian-statistics-to-compare-wines-ef2477047cb5
